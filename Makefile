@@ -1,5 +1,5 @@
 CC=clang++
-CFLAGS= -Wall -Wextra -O3 -std=c++20
+CFLAGS= -Wall -Wextra -O3 -std=c++20 -Wshadow -g
 
 
 lessgex: lessgex.cpp lessgex.h
