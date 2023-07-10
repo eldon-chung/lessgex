@@ -426,7 +426,10 @@ void test_match(std::string_view regex_pattern, std::string_view subject,
 
     // std::cout << "compiling:[" << regex_pattern << "]" << std::endl;
     Parser p{regex_pattern};
-    p.parse();
+    if (!p.parse()) {
+        std::cerr << "failed to parse this" << std::endl;
+        return;
+    }
     // std::cout << "getting matcher" << std::endl;
     Matcher m = p.get_compiled_matcher();
 
@@ -444,68 +447,18 @@ void test_match(std::string_view regex_pattern, std::string_view subject,
     }
 }
 
-int main() {
-    // parse_word_boundary1();
-    // parse_word_boundary2();
-    // parse_word_boundary3();
-    // parse_word_boundary4();
-    // parse_arb_1();
-    // parse_arb_2();
-    // parse_arb_3();
-    // test_table("ab");
-    // test_match("ab", "a", {});
-    // test_match("ab", "ab", Matcher::Result{0, 2});
-    // test_match("ab", "b", {});
-    // test_match("ab", "ba", {});
-    // test_match("ab", "aba", Matcher::Result{0, 2});
-    // test_match("ab", "bba", {});
-    // test_match("ab", "abab", Matcher::Result{0, 2});
-    // test_table("a|b|cf");
-    // test_match("a|b|cf", "bf", Matcher::Result{0, 1});
-    // test_match("a|b|cf", "cf", Matcher::Result{0, 2});
-    // test_table("ba+");
+int main(void) {
+    std::cout << std::boolalpha;
 
-    // test_match("ba+", "", {});
-    // test_match("ba+", "aaaaa", {});
-    // test_match("ba+", "baaaaa", Matcher::Result{0, 6});
-    // test_match("ba+", "abaaaaab", Matcher::Result{1, 6});
-    // test_match("ba+", "bbaaaaab", Matcher::Result{1, 6});
-    // test_match("ba+", "bbbbbbb", {});
+    Parser p("abcdef");
+    std::cout << "parse result:" << p.parse() << std::endl;
 
-    // test_table("ba?");
-    // test_match("ba?", "", {});
-    // test_match("ba?", "aaaaa", {});
-    // test_match("ba?", "baaaaa", Matcher::Result{0, 2});
-    // test_match("ba?", "bbaaaaab", Matcher::Result{0, 1});
-    // test_match("ba?", "abaaaaab", Matcher::Result{1, 2});
-    // test_match("ba?", "bbbbbbb", Matcher::Result{0, 1});
+    MatcherBuilder mb = p.get_matcher_builder();
+    std::cout << mb << std::endl;
 
-    // test_table("\\w*");
-    // test_match("\\w*", "", {});
-    // test_match("\\w*", "aa0aa", Matcher::Result{0, 2});
-    // test_match("\\w*", "baaaaa", Matcher::Result{0, 6});
-    // test_match("\\w*", "bbaaaaab", Matcher::Result{0, 8});
-    // test_match("\\w*", "abaaaaab", Matcher::Result{0, 8});
-    // test_match("\\w*", "bbbbbbb", Matcher::Result{0, 7});
-
-    // test_table("^ba");
-    // test_match("ba$", "aba", Matcher::Result{1, 2});
-    // test_match("ba$", "bat", {});
-    // test_match("ba$", "tbat", {});
-
-    // test_table("\bis\b");
-    // test_match("\\bis\\b", " is ", Matcher::Result{1, 2});
-    // test_table("\\bis\\b");
-    // test_match("\\bis\\b", " isb", {});
-    // test_match("\\bis\\b", "bis ", {});
-    test_match("\\bis", " is ", Matcher::Result{1, 2});
-    // test_match("[^abc-e]", "0", Matcher::Result{0, 1});
-    // test_match("[^abc-e]", "a", {});
-    // test_match("[^abc-e]", "b", {});
-    // test_match("[^abc-e]", "c", {});
-    // test_match("[^abc-e]", "d", {});
-    // test_match("[^abc-e]", "e", {});
-    // test_match("[^abc-e]", "f", Matcher::Result{0, 1});
+    prune_states(mb);
+    std::cout << "after pruning" << std::endl;
+    std::cout << mb << std::endl;
 
     return 0;
 }

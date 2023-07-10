@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <deque>
 #include <iostream>
 #include <iterator>
 #include <limits>
@@ -73,18 +74,29 @@ template <> struct std::hash<TransitionState> {
     }
 };
 
-template <> struct std::hash<std::pair<TransitionState, char>> {
-    std::size_t operator()(const std::pair<TransitionState, char> &pair) const {
-        return combine(69420, std::hash<TransitionState>()(pair.first),
-                       std::hash<char>()(pair.second));
+// template <> struct std::hash<std::pair<TransitionState, char>> {
+//     std::size_t operator()(const std::pair<TransitionState, char> &pair)
+//     const {
+//         return combine(69420, std::hash<TransitionState>()(pair.first),
+//                        std::hash<char>()(pair.second));
+//     }
+// };
+
+template <typename U, typename T> struct std::hash<std::pair<U, T>> {
+    std::size_t operator()(const std::pair<U, T> &pair) const {
+        return combine(69420, std::hash<U>()(pair.first),
+                       std::hash<T>()(pair.second));
     }
 };
 
 using StateChar = std::pair<TransitionState, char>;
 
 struct TransitionTable {
-    std::unordered_map<StateChar, std::vector<TransitionState>> table;
+    // std::vector<std::array<TransitionState, 256>> table;
+    // std::vector<TransitionState> starting_states;
+    // std::vector<bool> accepting_states;
 
+    std::unordered_map<StateChar, std::vector<TransitionState>> table;
     std::unordered_set<TransitionState> starting_states;
     std::unordered_set<TransitionState> accepting_states;
 };
@@ -167,6 +179,7 @@ class Matcher {
     // result
     // note: perhaps we'll eventually want something more stateful
     std::optional<Result> greedy_match_view(std::string_view str) {
+        // TODO: change this
         std::unordered_set<Result, ResultHash>
             result_list; // stores active results
         std::unordered_set<State, StateHash> active_states;
@@ -201,6 +214,14 @@ class Matcher {
             }
         };
 
+        auto add_starting_states_at = [&](size_t idx) {
+            std::transform(tb.starting_states.begin(), tb.starting_states.end(),
+                           std::inserter(active_states, active_states.end()),
+                           [idx](TransitionState const &nfa_state) -> State {
+                               return {idx, nfa_state};
+                           });
+        };
+
         // DEBUG:
         // {
         //     std::cerr << "about to start matching, accepting states:"
@@ -213,12 +234,9 @@ class Matcher {
 
         // run one round with the start of text char
         // add new starting states from this offset;
-        std::transform(tb.starting_states.begin(), tb.starting_states.end(),
-                       std::inserter(active_states, active_states.end()),
-                       [](TransitionState const &nfa_state) -> State {
-                           return {0, nfa_state};
-                       });
-
+        if (result_list.empty()) {
+            add_starting_states_at(0);
+        }
         // get one transition for each of the states
         // add new starting states from this offset;
         transition_char(active_states, next_states, 2, 2);
@@ -229,11 +247,9 @@ class Matcher {
         for (size_t s_idx = 0; s_idx < str.size(); ++s_idx) {
 
             // add new starting states from this offset;
-            std::transform(tb.starting_states.begin(), tb.starting_states.end(),
-                           std::inserter(active_states, active_states.end()),
-                           [s_idx](TransitionState const &nfa_state) -> State {
-                               return {s_idx, nfa_state};
-                           });
+            if (result_list.empty()) {
+                add_starting_states_at(s_idx);
+            }
 
             process_accepting_states(s_idx);
             // DEBUG:
@@ -606,6 +622,9 @@ struct MatcherBuilder {
             }
         }
     }
+
+    // define it somewhere else
+    void optimise_table();
 };
 
 struct Token {
@@ -649,20 +668,35 @@ struct Parser {
 
     Parser(std::string_view _sv) : sv(_sv) {}
 
+    MatcherBuilder get_matcher_builder() {
+        if (!result) {
+            throw std::runtime_error("there isnt anything parsed");
+        }
+        return *result;
+    }
+
     // needs to be called after a successful parse
     TransitionTable get_compiled_table() {
         if (!result) {
             throw std::runtime_error("there isnt anything parsed");
         }
-        TransitionTable to_ret = TransitionTable{
-            result->table,
-            std::unordered_set<TransitionState>{result->starting_states.begin(),
-                                                result->starting_states.end()},
-            std::unordered_set<TransitionState>{
-                result->accepting_states.begin(),
-                result->accepting_states.end()}};
 
-        return to_ret;
+        return TransitionTable{
+            result->table,
+            {result->starting_states.begin(), result->starting_states.end()},
+            {result->accepting_states.begin(), result->accepting_states.end()}};
+
+        // prune_states(*result);
+
+        // std::vector<std::array<TransitionState, 256>> compiled_table;
+
+        // for (auto cp_to_new_states : result->table) {
+        // }
+
+        // std::vector<bool> compiled_accept;
+
+        // return TransitionTable{compiled_table, result->starting_states,
+        //                        compiled_accept};
     }
 
     Matcher get_compiled_matcher() { return Matcher(get_compiled_table()); }
@@ -1020,7 +1054,7 @@ struct Parser {
                 sv_advance();
             }
             accum_b += (mb += *maybe_set);
-            return true;
+            return parse_help(accum_b);
         }
 
         // need to handle charsets,
@@ -1094,3 +1128,68 @@ std::ostream &operator<<(std::ostream &os, std::optional<T> const &opt) {
     }
     return os;
 }
+
+void prune_states(MatcherBuilder &mb) {
+    std::unordered_set<std::pair<StateChar, TransitionState>> all_edges;
+    for (auto table_pair : mb.table) {
+        for (auto targ_state : table_pair.second) {
+            all_edges.insert({table_pair.first, targ_state});
+        }
+    }
+
+    // create a transition state queue
+    std::deque<TransitionState> ts_queue{mb.accepting_states.begin(),
+                                         mb.accepting_states.end()};
+
+    std::unordered_set<TransitionState> visited;
+
+    std::cerr << "starting bfs" << std::endl;
+    while (!ts_queue.empty()) {
+        TransitionState curr_ts = ts_queue.front();
+        ts_queue.pop_front();
+
+        // if we have been visited we can trust
+        // our edges have been removed
+        if (visited.contains(curr_ts)) {
+            continue;
+        }
+
+        // mark all outgoing edges as important
+        if (!mb.reverse_table.contains(curr_ts)) {
+            continue;
+        }
+        for (auto anc_pair : mb.reverse_table.at(curr_ts)) {
+            all_edges.erase({anc_pair, curr_ts});
+            ts_queue.push_back(anc_pair.first);
+        }
+    }
+    std::cerr << "ending bfs" << std::endl;
+
+    auto remove_from_vec = [](std::vector<TransitionState> &vec,
+                              TransitionState targ_state) -> bool {
+        auto it = vec.begin();
+        while (it != vec.end()) {
+            if (*it == targ_state) {
+                vec.erase(it);
+                return true;
+            }
+            ++it;
+        }
+        return false;
+        // throw std::runtime_error("I need it removed and it's not here");
+    };
+
+    std::cerr << "deleting edges" << std::endl;
+    // now we delete all edges
+    for (auto edge : all_edges) {
+        // each edge should only be removed once
+        assert(remove_from_vec(mb.table.at(edge.first), edge.second));
+        if (mb.table.at(edge.first).empty()) {
+            mb.table.erase(edge.first);
+        }
+    }
+    std::cerr << "done deleting edges" << std::endl;
+}
+
+// add all the funny algos here
+void MatcherBuilder::optimise_table() {}
