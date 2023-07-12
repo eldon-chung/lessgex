@@ -450,15 +450,33 @@ void test_match(std::string_view regex_pattern, std::string_view subject,
 int main(void) {
     std::cout << std::boolalpha;
 
-    Parser p("abcdef");
-    std::cout << "parse result:" << p.parse() << std::endl;
+    Parser p("\\bfind me\\b");
+    bool parse_result = p.parse();
+    if (!parse_result) {
+        std::cout << "failed to parse for some reason" << std::endl;
+        return 0;
+    } else {
+        std::cout << "parsed, continuing" << std::endl;
+    }
 
     MatcherBuilder mb = p.get_matcher_builder();
-    std::cout << mb << std::endl;
+    // std::cout << mb << std::endl;
 
     prune_states(mb);
-    std::cout << "after pruning" << std::endl;
-    std::cout << mb << std::endl;
+    // std::cout << "after pruning" << std::endl;
+    // std::cout << mb << std::endl;
+
+    // resequence_states(mb);
+    // std::cout << "after resequencing" << std::endl;
+    // std::cout << mb << std::endl;
+
+    TransitionTable tb = compile_transition_table(mb);
+    // std::cout << "final table" << std::endl;
+    // std::cout << tb << std::endl;
+
+    Matcher matcher = Matcher(std::move(tb));
+    auto maybe_res = matcher.greedy_match_view("see if you can find me!");
+    std::cout << maybe_res << std::endl;
 
     return 0;
 }
