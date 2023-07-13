@@ -72,8 +72,9 @@ pcre_bench(std::string const &in_pattern, std::string const &in_subject) {
     auto t1 = std::chrono::high_resolution_clock::now();
 
     // you probably need this stuff
-    ovector = pcre2_get_ovector_pointer(match_data);
-    // printf("Match succeeded at offset %d\n", (int)ovector[0]);
+    // ovector = pcre2_get_ovector_pointer(match_data);
+    // printf("Match succeeded at offset %d, %d\n", (int)ovector[0],
+    //        (int)ovector[1]);
 
     // for (int i = 0; i < rc; i++) {
     //     PCRE2_SPTR substring_start = subject + ovector[2 * i];
@@ -105,13 +106,14 @@ my_bench(std::string const &in_pattern, std::string const &in_subject) {
 int main(int argc, char **argv) {
 
     if (argc < 3) {
-        std::cout << "provide both a pattern and a subject, and optionally a "
+        std::cout << "provide both a pattern and a subject, and maybe"
                      "number of iters"
                   << std::endl;
         return 0;
     }
     std::string pattern{argv[1]};
     std::string subject{argv[2]};
+
     uint32_t total_iter = 0;
     if (argc >= 4) {
         char *ignore;

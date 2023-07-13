@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cstring>
 #include <deque>
 #include <iostream>
@@ -113,6 +114,7 @@ struct TransitionTable {
     std::vector<State> starting_states;
     std::vector<bool> accepting_states;
     std::vector<uint8_t> front_entered_modifiers;
+    std::vector<State> acc_state_list;
 };
 
 std::ostream &operator<<(std::ostream &os, StateChar const &sc) {
@@ -153,6 +155,12 @@ std::ostream &operator<<(std::ostream &os, TransitionTable const &tb) {
     }
     os << "transition table end ====================" << std::endl;
 
+    os << "acc list ====================" << std::endl;
+    for (auto const &s : tb.acc_state_list) {
+        std::cout << s << std::endl;
+    }
+    os << "acc list end ====================" << std::endl;
+
     return os;
 }
 
@@ -184,6 +192,10 @@ class Matcher {
   private:
     TransitionTable tb;
 
+    static bool is_word_char(char ch) {
+        return ch != ' ' && ch != '\t' && ch != 3 && ch != 2;
+    }
+
     // intermediate state?
     struct State {
         size_t offset;
@@ -214,147 +226,179 @@ class Matcher {
         }
     };
 
+    // mostly screw around with this to change how the
+    // states are updated?
+    struct StateList {
+        static const size_t NOFFSET = (size_t)-1;
+        std::vector<size_t> active_state_to_offset;
+        std::vector<size_t> buffer_state_to_offset;
+
+        StateList(size_t fixed_size)
+            : active_state_to_offset(fixed_size, NOFFSET),
+              buffer_state_to_offset(fixed_size, NOFFSET) {}
+
+        void insert_state(size_t state_idx, size_t offset) {
+            if (active_state_to_offset[state_idx] == NOFFSET ||
+                offset < active_state_to_offset[state_idx]) {
+                active_state_to_offset[state_idx] = offset;
+            }
+        }
+
+        void insert_buffer_state(size_t state_idx, size_t offset) {
+            if (buffer_state_to_offset[state_idx] == NOFFSET ||
+                offset < buffer_state_to_offset[state_idx]) {
+                buffer_state_to_offset[state_idx] = offset;
+            }
+        }
+
+        void progress_states(TransitionTable const &tran_tab, char prev_char,
+                             char curr_char) {
+            for (size_t idx = 0; idx < buffer_state_to_offset.size(); ++idx) {
+                buffer_state_to_offset[idx] = NOFFSET;
+            }
+            for (size_t state_idx = 0;
+                 state_idx < active_state_to_offset.size(); ++state_idx) {
+
+                if (active_state_to_offset[state_idx] == NOFFSET) {
+                    continue;
+                }
+
+                uint8_t mod = tran_tab.front_entered_modifiers[state_idx];
+                for (auto next_state :
+                     tran_tab.trans_rows[state_idx][curr_char]) {
+
+                    if (mod == NONE) {
+                        insert_buffer_state(next_state,
+                                            active_state_to_offset[state_idx]);
+                        continue;
+                    }
+
+                    if (mod == (WB | NWB)) {
+                        continue;
+                    }
+
+                    bool is_word_boundary =
+                        (is_word_char(prev_char) != is_word_char(curr_char));
+
+                    if ((mod == WB && is_word_boundary) ||
+                        (mod == NWB && !is_word_boundary)) {
+                        insert_buffer_state(next_state,
+                                            active_state_to_offset[state_idx]);
+                    }
+                }
+            }
+            std::swap(active_state_to_offset, buffer_state_to_offset);
+        }
+
+        size_t &operator[](size_t state_idx) {
+            return active_state_to_offset[state_idx];
+        }
+    };
+
   public:
     Matcher(TransitionTable _tb) : tb(std::move(_tb)) {}
 
     std::optional<Result> greedy_match_view(std::string_view str) {
 
-        using StateSet = std::unordered_set<State, StateHash>;
-        using StateVec = std::vector<State>;
-
         // should we write our own contains for the states?
         // idea: for small enough stuff we just std::vector<bool>
-        StateSet active_states;
-        StateSet next_states;
-        std::optional<Result> best_result;
+        StateList state_list(tb.num_states);
+        std::optional<Result> result;
 
-        auto maybe_update_result = [&best_result](size_t start, size_t length) {
-            if (!best_result) {
-                best_result = {start, length};
-                return;
-            }
-
-            if (start < best_result->start ||
-                (start == best_result->start && length > best_result->length)) {
-                best_result = {start, length};
+        auto update_result = [&](size_t offset, size_t length) {
+            if (!result) {
+                result = Result{offset, length};
+            } else if (offset < result->start ||
+                       (offset == result->start && length > result->length)) {
+                result = Result{offset, length};
             }
         };
 
-        auto insert_states_into = [](std::vector<TState> const &to_insert,
-                                     StateSet &targ, size_t position) {
-            for (auto const &st : to_insert) {
-                targ.emplace(position, st);
-            }
-        };
+        auto process_accepts = [&, update_result](size_t final_offset,
+                                                  char curr_char,
+                                                  char next_char) {
+            for (auto const &acc_state : tb.acc_state_list) {
+                size_t offset = state_list[acc_state];
 
-        auto progress_states = [this, &best_result](StateSet const &from,
-                                                    char prev_ch, char curr_ch,
-                                                    StateSet &to) {
-            for (State st : from) {
-                // add the optimisation (for greedy) here instead:
-                if (best_result && st.offset > best_result->start) {
+                if (offset == StateList::NOFFSET) {
                     continue;
                 }
 
-                uint8_t mod = tb.front_entered_modifiers[st.nfa_state];
-
-                if (mod != NWB && mod != WB && mod != NONE) {
+                if (offset == final_offset) {
                     continue;
                 }
 
-                if (is_word_char(prev_ch) != is_word_char(curr_ch) &&
-                    mod == NWB) {
-                    continue;
-                }
-                if (is_word_char(prev_ch) == is_word_char(curr_ch) &&
-                    mod == WB) {
-                    continue;
-                }
-
-                // otherwise we should progress it
-                for (TransitionTable::State next_nfa_state :
-                     tb.trans_rows[st.nfa_state][curr_ch]) {
-                    to.insert({st.offset, next_nfa_state});
-                }
-            }
-        };
-
-        auto process_accepting_states = [this, &maybe_update_result,
-                                         str](StateSet const &states,
-                                              size_t curr_pos) {
-            // save a little time
-            if (curr_pos == 0) {
-                return;
-            }
-            for (State st : states) {
-                if (!tb.accepting_states[st.nfa_state]) {
-                    continue;
-                }
-
-                if (st.offset == curr_pos) {
-                    continue;
-                }
-
-                // optimisation for greedy requirement:
-                // get the earliest result offset
-                // tiebreak by length
-                // kill every other active state and result
-
-                uint8_t mod = tb.front_entered_modifiers[st.nfa_state];
+                uint8_t mod = tb.front_entered_modifiers[acc_state];
                 if (mod == NONE) {
-                    maybe_update_result(st.offset, curr_pos - st.offset);
+                    update_result(offset, final_offset - offset);
                     continue;
                 }
 
-                if (mod != NWB && mod != WB) {
+                if (mod == (WB | NWB)) {
                     continue;
                 }
 
-                char lookahead = (curr_pos >= str.length()) ? 3 : str[curr_pos];
-                char curr = str[curr_pos - 1];
+                bool word_boundary =
+                    (is_word_char(curr_char) != is_word_char(next_char));
+                if (mod == WB && word_boundary) {
+                    update_result(offset, final_offset - offset);
+                } else if (mod == NWB && !word_boundary) {
+                    update_result(offset, final_offset - offset);
+                }
+            }
+        };
 
-                if (mod == NWB &&
-                    is_word_char(lookahead) == is_word_char(curr)) {
-                    maybe_update_result(st.offset, curr_pos - st.offset);
-                } else if (mod == WB &&
-                           is_word_char(lookahead) != is_word_char(curr)) {
-                    maybe_update_result(st.offset, curr_pos - st.offset);
+        auto insert_states = [&](size_t offset, char curr_char,
+                                 char prev_char) {
+            for (auto const &state : tb.starting_states) {
+                uint8_t mod = tb.front_entered_modifiers[state];
+                if (mod == NONE) {
+                    state_list.insert_state(state, offset);
+                    continue;
+                }
+
+                if (mod == (WB | NWB)) {
+                    continue;
+                }
+
+                bool word_boundary =
+                    (is_word_char(curr_char) != is_word_char(prev_char));
+                if ((mod == WB && word_boundary) ||
+                    (mod == NWB && !word_boundary)) {
+                    state_list.insert_state(state, offset);
                 }
             }
         };
 
         // feed the line start char
         char prev_char = 2;
-        insert_states_into(tb.starting_states, next_states, 0);
-        progress_states(next_states, prev_char, 2, active_states);
-        next_states.clear();
+        // start the initial list
+        insert_states(0, 2, 2);
+        // feed the bol character
+        state_list.progress_states(tb, 2, 2);
 
         for (size_t idx = 0; idx < str.length(); ++idx) {
-            process_accepting_states(active_states, idx);
-
-            if (!best_result) {
-                insert_states_into(tb.starting_states, active_states, idx);
+            if (!result) {
+                insert_states(idx, str[idx], prev_char);
             } else {
-                std::erase_if(active_states, [&](State const &st) {
-                    return (st.offset > best_result->start);
-                });
+                // do we want to do pruning?
             }
-            progress_states(active_states, prev_char, str[idx], next_states);
+            state_list.progress_states(tb, prev_char, str[idx]);
+            // technically it's after idx?
+            process_accepts(idx + 1, str[idx],
+                            (idx + 1 >= str.length()) ? 3 : str[idx + 1]);
+
             prev_char = str[idx];
-            std::swap(next_states, active_states);
-            next_states.clear();
         }
 
-        // once before the eol
-        process_accepting_states(active_states, str.length());
-
-        progress_states(active_states, prev_char, 3, next_states);
-        process_accepting_states(next_states, str.length());
-        return best_result;
+        state_list.progress_states(tb, prev_char, 3);
+        process_accepts(str.length(), str.back(), 3);
+        return result;
     }
 
-    bool is_word_char(char ch) {
-        return ch != ' ' && ch != '\t' && ch != 3 && ch != 2;
+    friend std::ostream &operator<<(std::ostream &os, Matcher const &m) {
+        os << m.tb << std::endl;
+        return os;
     }
 };
 
@@ -374,8 +418,8 @@ struct MatcherBuilder {
     std::unordered_map<TransitionState, std::vector<StateChar>> reverse_table;
 
     MatcherBuilder()
-        : starting_states(1, TransitionState()), accepting_states{
-                                                     starting_states.front()} {}
+        : starting_states(1, TransitionState()),
+          accepting_states{starting_states.front()} {}
 
     MatcherBuilder(MatcherBuilder const &to_copy) {
         std::unordered_map<TransitionState, TransitionState> old_to_new;
@@ -1119,8 +1163,14 @@ TransitionTable compile_transition_table(MatcherBuilder &mb) {
         final_starts.push_back(start_st.id);
     }
 
-    return {old_to_new.size(), final_table, final_starts, final_accepts,
-            final_modifiers};
+    std::vector<TransitionTable::State> acc_state_list;
+    acc_state_list.reserve(mb.accepting_states.size());
+    for (auto const &acc_st : mb.accepting_states) {
+        acc_state_list.push_back(acc_st.id);
+    }
+
+    return {old_to_new.size(), final_table,     final_starts,
+            final_accepts,     final_modifiers, acc_state_list};
 }
 
 // Given a matcher builder, resequences the states
