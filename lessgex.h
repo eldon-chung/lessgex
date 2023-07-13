@@ -689,9 +689,7 @@ struct Parser {
             throw std::runtime_error("there isnt anything parsed");
         }
 
-        std::cerr << "pruning" << std::endl;
         prune_states(*result);
-        std::cerr << "pruned states" << std::endl;
         return compile_transition_table(*result);
     }
 
@@ -1134,11 +1132,9 @@ struct TSCMP {
 // consumes the matcher builder
 TransitionTable compile_transition_table(MatcherBuilder &mb) {
     // takes a resequenced table and creates a vec of TransitionTable::row
-    std::cerr << "resequencing" << std::endl;
     std::unordered_map<TransitionState, TransitionState> old_to_new =
         resequence_states(mb);
 
-    std::cerr << "resequenced" << std::endl;
     std::vector<TransitionTable::Row> final_table(old_to_new.size());
     std::vector<uint8_t> final_modifiers(old_to_new.size());
 
