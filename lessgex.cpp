@@ -450,8 +450,9 @@ void test_match(std::string_view regex_pattern, std::string_view subject,
 int main(void) {
     std::cout << std::boolalpha;
 
-    Parser p("ab?ab+abab*ab*ab?a*ab+");
+    Parser p(".*.*");
     bool parse_result = p.parse();
+    std::cout << "parsed" << std::endl;
     if (!parse_result) {
         std::cout << "failed to parse for some reason" << std::endl;
         return 0;
@@ -461,13 +462,14 @@ int main(void) {
 
     // Matcher matcher = Matcher(std::move(tb));
     Matcher matcher = p.get_compiled_matcher();
+    std::cerr << "compiled" << std::endl;
     // std::cerr << matcher << std::endl;
-    for (size_t idx = 0; idx < 1000'000'0; ++idx) {
-        auto maybe_res =
-            matcher.greedy_match_view("aababaaaaabababaaaababbbbabbbbabbbababab"
-                                      "bbababbaabbbabbaabbabbababab");
-    }
-    // std::cout << maybe_res << std::endl;
+    // for (size_t idx = 0; idx < 1000'000'0; ++idx) {
+    auto maybe_res =
+        matcher.greedy_match_view("aababaaaaabababaaaababbbbabbbbabbbababab"
+                                  "bbababbaabbbabbaabbabbababab");
+    // }
+    std::cout << maybe_res << std::endl;
 
     return 0;
 }
