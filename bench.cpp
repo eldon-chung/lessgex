@@ -90,7 +90,7 @@ pcre_bench(std::string const &in_pattern, std::string const &in_subject) {
 
 std::optional<std::chrono::duration<double, std::nano>>
 my_bench(std::string const &in_pattern, std::string const &in_subject) {
-    Parser p{in_pattern};
+    Parser p(in_pattern);
     if (!p.parse()) {
         return std::nullopt;
     }
@@ -108,6 +108,7 @@ int main(int argc, char **argv) {
         std::cout << "provide both a pattern and a subject, and optionally a "
                      "number of iters"
                   << std::endl;
+        return 0;
     }
     std::string pattern{argv[1]};
     std::string subject{argv[2]};

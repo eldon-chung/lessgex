@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstring>
 #include <deque>
 #include <iostream>
 #include <iterator>
@@ -18,6 +19,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <ranges>
@@ -106,6 +108,7 @@ struct TransitionTable {
     using State = size_t;
     using Row = std::array<std::vector<State>, 256>;
 
+    size_t num_states;
     std::vector<Row> trans_rows;
     std::vector<State> starting_states;
     std::vector<bool> accepting_states;
@@ -607,30 +610,6 @@ struct MatcherBuilder {
             }
         }
     }
-
-    // define it somewhere else
-    void optimise_table();
-};
-
-struct Token {
-    enum class Type {
-        CHAR,
-        PLUS,
-        STAR,
-        QUESTION,
-        ESCAPED,
-        PAREN_OPEN,
-        PAREN_CLOSE,
-        SET_OPEN,
-        SET_CLOSE,
-        DASH,
-        DOLLAR,
-        CARET,
-        END,
-    };
-
-    Type type;
-    char c;
 };
 
 struct Parser {
@@ -1085,37 +1064,6 @@ std::ostream &operator<<(std::ostream &os, MatcherBuilder const &tb) {
     return os;
 }
 
-// std::ostream &operator<<(std::ostream &os, TransitionTable const &tb) {
-//     os << "starting states: " << std::endl;
-//     for (const auto &s : tb.starting_states) {
-//         os << s << std::endl;
-//     }
-//     os << "========================" << std::endl;
-//     os << "accepting states: " << std::endl;
-//     for (const auto &s : tb.accepting_states) {
-//         os << s << std::endl;
-//     }
-//     os << "========================" << std::endl;
-//     os << "transition table: " << std::endl;
-//     for (size_t idx = 0; idx < tb.trans_rows.size(); ++idx) {
-//         os << "------------------" << std::endl;
-//         os << "from state_idx:" << idx << std::endl;
-//         for (size_t char_idx = 0; char_idx < 128; ++char_idx) {
-//             if (tb.trans_rows[idx][char_idx].empty()) {
-//                 continue;
-//             }
-//             os << "through char:" << char_idx << std::endl;
-//             os << "~~~~~~~~~~~~~~~~" << std::endl;
-//             for (auto next_state : tb.trans_rows[idx][char_idx]) {
-//                 os << "{" << next_state << "}" << std::endl;
-//             }
-//             os << "~~~~~~~~~~~~~~~~" << std::endl;
-//         }
-//         os << "------------------" << std::endl;
-//     }
-//     os << "========================" << std::endl;
-// }
-
 std::ostream &operator<<(std::ostream &os, Matcher::Result const &res) {
     os << "start: " << res.start << " length: " << res.length;
     return os;
@@ -1171,7 +1119,8 @@ TransitionTable compile_transition_table(MatcherBuilder &mb) {
         final_starts.push_back(start_st.id);
     }
 
-    return {final_table, final_starts, final_accepts, final_modifiers};
+    return {old_to_new.size(), final_table, final_starts, final_accepts,
+            final_modifiers};
 }
 
 // Given a matcher builder, resequences the states
@@ -1180,8 +1129,8 @@ std::unordered_map<TransitionState, TransitionState>
 resequence_states(MatcherBuilder &mb) {
     std::unordered_map<TransitionState, TransitionState> old_to_new;
 
+    size_t running_id = 0;
     auto add_old_to_new_entry = [&](TransitionState ts) {
-        static size_t running_id = 0;
         auto it = old_to_new.find(ts);
         if (it == old_to_new.end()) {
             old_to_new.insert({ts, {running_id++, ts.get_front_modifier()}});
